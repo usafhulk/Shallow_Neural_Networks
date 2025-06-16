@@ -1,0 +1,62 @@
+# Import necessary libraries
+import torch
+import torch.nn as nn
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import List
+
+# Define the neural network architecture
+class CustomerPurchaseNet(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super(CustomerPurchaseNet, self).__init__()
+        self.hidden = nn.Linear(input_size, hidden_size)
+        self.output = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x):
+        hidden_output = torch.relu(self.hidden(x))
+        purchase_probability = torch.sigmoid(self.output(hidden_output))
+        return purchase_probability
+
+# Load the trained model
+def load_model(model_path: str):
+    model = CustomerPurchaseNet(input_size=1, hidden_size=5, output_size=1)  # Adjust hidden size as per your training
+    model.load_state_dict(torch.load(model_path))
+    model.eval()  # Set the model to evaluation mode
+    return model
+
+# Define the FastAPI app
+app = FastAPI()
+
+# Load the model (make sure to provide the correct path)
+model = load_model("customer_purchase_model.pth")  # Update with your model path
+
+# Define the request body for predictions
+class CustomerData(BaseModel):
+    browsing_time: List[float]
+
+# Define the prediction endpoint
+@app.post("/predict")
+def predict(data: CustomerData):
+    # Prepare input tensor
+    browsing_times = torch.tensor(data.browsing_time).float().unsqueeze(1)  # Shape: (N, 1)
+    
+    with torch.no_grad():  # Disable gradient calculation
+        predictions = model(browsing_times)  # Get predictions
+        purchase_probabilities = predictions.numpy().flatten()  # Convert to numpy array
+    
+    # Create response
+    results = []
+    for time, prob in zip(data.browsing_time, purchase_probabilities):
+        prediction = "WILL PURCHASE" if prob > 0.5 else "WON'T PURCHASE"
+        results.append({
+            "browsing_time": time,
+            "purchase_probability": prob,
+            "prediction": prediction
+        })
+    
+    return {"predictions": results}
+
+# Run the FastAPI app (uncomment the following line to run the app)
+if __name__ == "__main__":
+import uvicorn
+uvicorn.run(app, host="0.0.0.0", port=8000)
